@@ -51,11 +51,8 @@ public class TaxicabMultiSearch {
 
     /*
     *
-    *   [0;15600)
-        [39767;39774]
-        [40000;40002]
-        [41000;41001]
-        [41250;44014)
+    *   [0;15000)
+        [41000;44014)
     *
     * */
 
@@ -118,7 +115,7 @@ public class TaxicabMultiSearch {
         int[] spf = buildSpf((int) maxM);
 
         // ---- ciclo a batch ----
-        int cores = 10;
+        int cores = Runtime.getRuntime().availableProcessors();
         ExecutorService pool = Executors.newFixedThreadPool(cores);
         System.out.println("Core: " + cores);
         long t0 = System.nanoTime();
