@@ -1,4 +1,4 @@
-name: run-taxicab
+name: run-taxicab-parallelo
 
 on:
   workflow_dispatch:   # si avvia a mano dalla scheda Actions
@@ -7,6 +7,22 @@ jobs:
   run:
     runs-on: ubuntu-latest
     timeout-minutes: 360
+    strategy:
+      fail-fast: false   # se una fetta fallisce, le altre continuano
+      matrix:
+        include:
+          - { start: 244,   end: 1658 }
+          - { start: 1658, end: 2837 }
+          - { start: 2837, end: 3828 }
+          - { start: 3828, end: 4699 }
+          - { start: 4699, end: 5481 }
+          - { start: 5481, end: 6192 }
+          - { start: 6192, end: 6845 }
+          - { start: 6845, end: 7447 }
+          - { start: 7447, end: 8004 }
+          - { start: 8004, end: 8521 }
+          - { start: 8521, end: 9003 }
+          - { start: 9003, end: 9450 }
     steps:
       - name: Scarica il codice del repository
         uses: actions/checkout@v4
@@ -17,6 +33,12 @@ jobs:
           distribution: temurin
           java-version: '21'
 
+      - name: Imposta la fetta di questo job
+        run: |
+          sed -i -E "s/(START_INDEX_OVERRIDE = )[^;]+;/\1${{ matrix.start }};/" TaxicabMultiSearchMinMax.java
+          sed -i -E "s/(END_INDEX = )[^;]+;/\1${{ matrix.end }};/" TaxicabMultiSearchMinMax.java
+          grep -E "START_INDEX_OVERRIDE =|END_INDEX =" TaxicabMultiSearchMinMax.java
+
       - name: Compila
         run: javac TaxicabMultiSearchMinMax.java
 
@@ -24,13 +46,12 @@ jobs:
         run: |
           timeout 345m java -Xmx12g TaxicabMultiSearchMinMax 2>&1 | tee log.txt || true
 
-      - name: Salva risultati, checkpoint e log
+      - name: Salva risultati e log
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: risultati
+          name: risultati-${{ matrix.start }}-${{ matrix.end }}
           path: |
             log.txt
             hits_*.txt
-            checkpoint_*.txt
           if-no-files-found: ignore
