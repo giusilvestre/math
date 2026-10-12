@@ -11,7 +11,7 @@ jobs:
       fail-fast: false   # se una fetta fallisce, le altre continuano
       matrix:
         include:
-          - { start: 244,   end: 1658 }
+          - { start: 279,   end: 1658 }
           - { start: 1658, end: 2837 }
           - { start: 2837, end: 3828 }
           - { start: 3828, end: 4699 }
