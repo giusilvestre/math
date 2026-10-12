@@ -67,8 +67,8 @@ public class TaxicabMultiSearchMinMax {
     // ============ 2) CONTROLLO DEL SINGOLO LANCIO (modificabile a ogni lancio) ============
     static final long START_INDEX_OVERRIDE = 10;        // -1 = riprendi dal checkpoint; >=0 = fetta manuale
     static final long END_INDEX = 9450;       // esclusivo; MAX_VALUE = fino a fine famiglia
-    static final long RUN_STEP_BUDGET = 1_500_000_000L;   // passi M massimi per questo lancio
-    static final long BATCH_STEPS = 5_000_000L;        // granularita' di checkpoint / controllo tempo
+    static final long RUN_STEP_BUDGET = 7_500_000_000L;   // passi M massimi per questo lancio
+    static final long BATCH_STEPS = 10_000_000L;        // granularita' di checkpoint / controllo tempo
     static final String CHECKPOINT_FILE = "checkpoint_7_157_minmax6.txt";
     static final String RESULTS_FILE = "hits_7_157_minmax6.txt";
 
