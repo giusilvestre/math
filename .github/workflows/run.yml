@@ -1,0 +1,36 @@
+name: run-taxicab
+
+on:
+  workflow_dispatch:   # si avvia a mano dalla scheda Actions
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Scarica il codice del repository
+        uses: actions/checkout@v4
+
+      - name: Installa Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Compila
+        run: javac TaxicabMultiSearchMinMax.java
+
+      - name: Esegui (si ferma da solo a 5h45m, prima del limite di 6h)
+        run: |
+          timeout 345m java -Xmx12g TaxicabMultiSearchMinMax 2>&1 | tee log.txt || true
+
+      - name: Salva risultati, checkpoint e log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: risultati
+          path: |
+            log.txt
+            hits_*.txt
+            checkpoint_*.txt
+          if-no-files-found: ignore
