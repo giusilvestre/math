@@ -1,102 +1,46 @@
 name: run-taxicab
 
 on:
-  workflow_dispatch:
-    inputs:
-      steps_per_job:
-        description: "Passi per job (fette bilanciate). Piu' basso = piu' job, ognuno piu' corto"
-        default: "250000000"
-      ranges:
-        description: "Opzionale: solo questi indici, es. 1000-5000,7000-9000 (vuoto = tutta la famiglia)"
-        default: ""
+  workflow_dispatch:   # si avvia a mano dalla scheda Actions
 
 jobs:
-  # 1) calcola da solo le fette (indici start/end) e crea la matrice
-  plan:
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.m.outputs.matrix }}
-      count: ${{ steps.m.outputs.count }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-      - run: javac TaxicabSearch.java
-      - id: m
-        env:
-          STEPS: ${{ inputs.steps_per_job }}
-          RANGES: ${{ inputs.ranges }}
-        run: |
-          java -Xmx8g TaxicabSearch plan "$STEPS" "$RANGES" > matrix.json
-          cat matrix.json
-          echo "matrix=$(cat matrix.json)" >> "$GITHUB_OUTPUT"
-          echo "count=$(python3 -c "import json;print(len(json.load(open('matrix.json'))['include']))")" >> "$GITHUB_OUTPUT"
-
-  # 2) un job per fetta; quelli oltre il limite di job contemporanei restano in coda e partono da soli
   run:
-    needs: plan
-    name: fetta ${{ matrix.start }}-${{ matrix.end }}
     runs-on: ubuntu-latest
     timeout-minutes: 360
     strategy:
-      fail-fast: false
-      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
+      fail-fast: false   # se una fetta fallisce, le altre continuano
+      matrix:
+        include:
+          - { start: 36805, end: 38000 }
+          - { start: 28532, end: 30000 }
+          - { start: 33343, end: 34500 }
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - name: Scarica il codice del repository
+        uses: actions/checkout@v4
+
+      - name: Installa Java 21
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
-      - run: javac TaxicabSearch.java
-      - name: Esegui (il programma si ferma da solo a 330 min, a fine batch)
+
+      - name: Imposta la fetta di questo job
         run: |
-          timeout 350m java -Xmx12g TaxicabSearch run ${{ matrix.start }} ${{ matrix.end }} 330 2>&1 | tee log.txt || true
-      - uses: actions/upload-artifact@v4
+          sed -i -E "s/(START_INDEX_OVERRIDE = )[^;]+;/\1${{ matrix.start }};/" TaxicabMultiSearch.java
+          sed -i -E "s/(END_INDEX = )[^;]+;/\1${{ matrix.end }};/" TaxicabMultiSearch.java
+          grep -E "START_INDEX_OVERRIDE =|END_INDEX =" TaxicabMultiSearch.java
+      - name: Compila
+        run: javac TaxicabMultiSearch.java
+
+      - name: Esegui (si ferma da solo a 5h45m, prima del limite di 6h)
+        run: |
+          timeout 345m java -Xmx12g TaxicabMultiSearch 2>&1 | tee log.txt || true
+      - name: Salva risultati e log
         if: always()
+        uses: actions/upload-artifact@v4
         with:
           name: risultati-${{ matrix.start }}-${{ matrix.end }}
           path: |
             log.txt
             hits_*.txt
-            status.txt
           if-no-files-found: ignore
-
-  # 3) riepilogo: hit trovati, fette incomplete (con gli intervalli da incollare in un nuovo lancio)
-  summary:
-    needs: [plan, run]
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: out
-        continue-on-error: true
-      - name: Riepilogo
-        env:
-          EXPECTED: ${{ needs.plan.outputs.count }}
-        run: |
-          {
-            echo "## Riepilogo"
-            got=$(ls -d out/risultati-* 2>/dev/null | wc -l)
-            echo "- Fette attese: $EXPECTED, con artifact: $got"
-            echo "- Fette complete: $(cat out/*/status.txt 2>/dev/null | grep -c '^DONE')"
-            echo
-            echo "### Risultati trovati"
-            if ls out/*/hits_*.txt >/dev/null 2>&1; then
-              echo '```'; cat out/*/hits_*.txt; echo '```'
-              grep -l "MIGLIORE DEL BOUND" out/*/hits_*.txt >/dev/null 2>&1 && echo "**ATTENZIONE: trovato un candidato migliore del bound noto!**"
-            else
-              echo "Nessun risultato (nessun N con >= 7 rappresentazioni)."
-            fi
-            echo
-            echo "### Fette incomplete (da rilanciare)"
-            inc=$(cat out/*/status.txt 2>/dev/null | grep '^INCOMPLETE' | sed -E 's/.* end=([0-9]+) next=([0-9]+).*/\2-\1/' | paste -sd, -)
-            if [ -n "$inc" ]; then
-              echo "Nel campo **ranges** del prossimo lancio incolla:"
-              echo '```'; echo "$inc"; echo '```'
-            else
-              echo "Nessuna. (Se mancano artifact rispetto alle fette attese, quei job sono falliti o annullati: rilancia i loro intervalli.)"
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
