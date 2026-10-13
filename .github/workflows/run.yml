@@ -11,13 +11,13 @@ jobs:
       fail-fast: false   # se una fetta fallisce, le altre continuano
       matrix:
         include:
-          - { start: 2804, end: 2837 }
-          - { start: 3797, end: 3828 }
-          - { start: 5352, end: 5481 }
-          - { start: 6094, end: 6192 }
-          - { start: 6744, end: 6845 }
-          - { start: 7335, end: 7447 }
-          - { start: 8446, end: 8521 }
+          - { start: 40003, end: 40950 }
+          - { start: 15601, end: 20000 }
+          - { start: 20000, end: 25000 }
+          - { start: 25000, end: 30000 }
+          - { start: 30000, end: 34500 }
+          - { start: 34500, end: 38000 }
+          - { start: 38000, end: 39766 }
     steps:
       - name: Scarica il codice del repository
         uses: actions/checkout@v4
@@ -30,16 +30,16 @@ jobs:
 
       - name: Imposta la fetta di questo job
         run: |
-          sed -i -E "s/(START_INDEX_OVERRIDE = )[^;]+;/\1${{ matrix.start }};/" TaxicabMultiSearchMinMax.java
-          sed -i -E "s/(END_INDEX = )[^;]+;/\1${{ matrix.end }};/" TaxicabMultiSearchMinMax.java
-          grep -E "START_INDEX_OVERRIDE =|END_INDEX =" TaxicabMultiSearchMinMax.java
+          sed -i -E "s/(START_INDEX_OVERRIDE = )[^;]+;/\1${{ matrix.start }};/" TaxicabMultiSearch.java
+          sed -i -E "s/(END_INDEX = )[^;]+;/\1${{ matrix.end }};/" TaxicabMultiSearch.java
+          grep -E "START_INDEX_OVERRIDE =|END_INDEX =" TaxicabMultiSearch.java
 
       - name: Compila
-        run: javac TaxicabMultiSearchMinMax.java
+        run: javac TaxicabMultiSearch.java
 
       - name: Esegui (si ferma da solo a 5h45m, prima del limite di 6h)
         run: |
-          timeout 345m java -Xmx12g TaxicabMultiSearchMinMax 2>&1 | tee log.txt || true
+          timeout 345m java -Xmx12g TaxicabMultiSearch 2>&1 | tee log.txt || true
 
       - name: Salva risultati e log
         if: always()
