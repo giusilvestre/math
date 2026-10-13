@@ -11,18 +11,13 @@ jobs:
       fail-fast: false   # se una fetta fallisce, le altre continuano
       matrix:
         include:
-          - { start: 279,   end: 1658 }
-          - { start: 1658, end: 2837 }
-          - { start: 2837, end: 3828 }
-          - { start: 3828, end: 4699 }
-          - { start: 4699, end: 5481 }
-          - { start: 5481, end: 6192 }
-          - { start: 6192, end: 6845 }
-          - { start: 6845, end: 7447 }
-          - { start: 7447, end: 8004 }
-          - { start: 8004, end: 8521 }
-          - { start: 8521, end: 9003 }
-          - { start: 9003, end: 9450 }
+          - { start: 2804, end: 2837 }
+          - { start: 3797, end: 3828 }
+          - { start: 5352, end: 5481 }
+          - { start: 6094, end: 6192 }
+          - { start: 6744, end: 6845 }
+          - { start: 7335, end: 7447 }
+          - { start: 8446, end: 8521 }
     steps:
       - name: Scarica il codice del repository
         uses: actions/checkout@v4
