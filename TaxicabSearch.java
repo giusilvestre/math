@@ -71,7 +71,7 @@ public class TaxicabSearch {
     static long END_INDEX = Long.MAX_VALUE;             // esclusivo; MAX_VALUE = fino a fine famiglia
     static long RUN_STEP_BUDGET = 10_000_000_000L;      // passi M massimi per questo lancio
     static double MAX_RUN_MINUTES = 0;                  // 0 = nessun limite di tempo; >0 = stop a fine batch utile
-    static final long BATCH_STEPS = 2_000_000L;         // granularita' di checkpoint / controllo tempo
+    static final long BATCH_STEPS = 10_000_000L;         // granularita' di checkpoint / controllo tempo
     static final String STATUS_FILE = "status.txt";     // scritto a fine lancio (DONE / INCOMPLETE nextIndex=...)
     static final String CHECKPOINT_FILE = "checkpoint_" + PRIMES[0] + "_" + PRIMES[PRIMES.length - 1] + "_minmax" + MIN_PRIMES_IN_SEED + ".txt";
     static final String RESULTS_FILE = "hits_" + PRIMES[0] + "_" + PRIMES[PRIMES.length - 1] + "_minmax" + MIN_PRIMES_IN_SEED + ".txt";
