@@ -11,9 +11,7 @@ jobs:
       fail-fast: false   # se una fetta fallisce, le altre continuano
       matrix:
         include:
-          - { start: 21570, end: 25000 }
-          - { start: 26172, end: 30000 }
-          - { start: 30861, end: 34500 }
+          - { start: 17610, end: 20000 }
     steps:
       - name: Scarica il codice del repository
         uses: actions/checkout@v4

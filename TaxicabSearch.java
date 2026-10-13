@@ -59,8 +59,8 @@ public class TaxicabSearch {
             163, 181, 193, 199, 211, 223, 229, 241, 271, 277, 283	// nuovi
     };
     static final int OLD_PRIMES_COUNT = 17;
-    static final int MIN_PRIMES_IN_SEED = 9;
-    static final int MAX_PRIMES_IN_SEED = 9;
+    static final int MIN_PRIMES_IN_SEED = 8;
+    static final int MAX_PRIMES_IN_SEED = 8;
     static final long S_MIN = 10_000_000_000L;          // 1e10
     static final long S_MAX = 1_000_000_000_000_000L;   // 1e15
 
@@ -69,8 +69,8 @@ public class TaxicabSearch {
     static final long END_INDEX = Long.MAX_VALUE;       // esclusivo; MAX_VALUE = fino a fine famiglia
     static final long RUN_STEP_BUDGET = 10_000_000_000L;   // passi M massimi per questo lancio
     static final long BATCH_STEPS = 10_000_000L;        // granularita' di checkpoint / controllo tempo
-    static final String CHECKPOINT_FILE = "checkpoint_7_283_minmax9.txt";
-    static final String RESULTS_FILE = "hits_7_283_minmax9.txt";
+    static final String CHECKPOINT_FILE = "checkpoint_" + PRIMES[0] + "_" + PRIMES[PRIMES.length - 1] + "_minmax" + MIN_PRIMES_IN_SEED + ".txt";
+    static final String RESULTS_FILE = "hits_" + PRIMES[0] + "_" + PRIMES[PRIMES.length - 1] + "_minmax" + MIN_PRIMES_IN_SEED + ".txt";
 
     // ============ costanti del problema ============
     static final int TARGET_WAYS = 7;
@@ -89,7 +89,7 @@ public class TaxicabSearch {
                 + ";minPrimes=" + MIN_PRIMES_IN_SEED + ";maxPrimes=" + MAX_PRIMES_IN_SEED
                 + ";sMin=" + S_MIN + ";sMax=" + S_MAX + ";size=" + n + ";steps=" + cum[n];
 
-        System.out.println("=== FASE B: seed squarefree con primi = 1 (mod 3) ===");
+        System.out.println("START " + PRIMES[0] + "_" + PRIMES[PRIMES.length - 1] + "_minmax" + MIN_PRIMES_IN_SEED);
         System.out.println("Seed nella famiglia: " + n + "   passi totali: " + String.format("%,d", cum[n]));
 
         // ---- fetta di questo lancio ----
