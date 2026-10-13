@@ -1,4 +1,4 @@
-name: run-taxicab-parallelo
+name: run-taxicab-7-283_9
 
 on:
   workflow_dispatch:   # si avvia a mano dalla scheda Actions
