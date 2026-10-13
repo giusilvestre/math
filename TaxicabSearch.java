@@ -65,10 +65,14 @@ public class TaxicabSearch {
     static final long S_MAX = 1_000_000_000_000_000L;   // 1e15
 
     // ============ 2) CONTROLLO DEL SINGOLO LANCIO (modificabile a ogni lancio) ============
-    static final long START_INDEX_OVERRIDE = -1;        // -1 = riprendi dal checkpoint; >=0 = fetta manuale
-    static final long END_INDEX = Long.MAX_VALUE;       // esclusivo; MAX_VALUE = fino a fine famiglia
-    static final long RUN_STEP_BUDGET = 10_000_000_000L;   // passi M massimi per questo lancio
-    static final long BATCH_STEPS = 10_000_000L;        // granularita' di checkpoint / controllo tempo
+    // NOTA: queste costanti sono i valori di default (uso a mano da IDE). Da riga di comando
+    // (GitHub Actions) vengono sovrascritte dai parametri "run" / "plan" (vedi main).
+    static long START_INDEX_OVERRIDE = -1;              // -1 = riprendi dal checkpoint; >=0 = fetta manuale
+    static long END_INDEX = Long.MAX_VALUE;             // esclusivo; MAX_VALUE = fino a fine famiglia
+    static long RUN_STEP_BUDGET = 10_000_000_000L;      // passi M massimi per questo lancio
+    static double MAX_RUN_MINUTES = 0;                  // 0 = nessun limite di tempo; >0 = stop a fine batch utile
+    static final long BATCH_STEPS = 2_000_000L;         // granularita' di checkpoint / controllo tempo
+    static final String STATUS_FILE = "status.txt";     // scritto a fine lancio (DONE / INCOMPLETE nextIndex=...)
     static final String CHECKPOINT_FILE = "checkpoint_" + PRIMES[0] + "_" + PRIMES[PRIMES.length - 1] + "_minmax" + MIN_PRIMES_IN_SEED + ".txt";
     static final String RESULTS_FILE = "hits_" + PRIMES[0] + "_" + PRIMES[PRIMES.length - 1] + "_minmax" + MIN_PRIMES_IN_SEED + ".txt";
 
@@ -88,6 +92,29 @@ public class TaxicabSearch {
         String fingerprint = "primes=" + Arrays.toString(PRIMES) + ";oldPrimesCount=" + OLD_PRIMES_COUNT
                 + ";minPrimes=" + MIN_PRIMES_IN_SEED + ";maxPrimes=" + MAX_PRIMES_IN_SEED
                 + ";sMin=" + S_MIN + ";sMax=" + S_MAX + ";size=" + n + ";steps=" + cum[n];
+
+        // ---- parametri da riga di comando ----
+        //   plan <passiPerJob> [da] [a]     -> stampa su stdout la matrice JSON {"include":[{"start":..,"end":..},..]}
+        //   run  <start> <end> [maxMinuti]  -> elabora la fetta [start,end) (modalita' fetta manuale)
+        if (args.length >= 2 && args[0].equals("plan")) {
+            long perJob = Long.parseLong(args[1].trim());
+            // args[2] (opzionale): intervalli "a-b,c-d" di indici da pianificare; vuoto = tutta la famiglia
+            List<int[]> ranges = new ArrayList<>();
+            if (args.length > 2 && !args[2].isBlank()) {
+                for (String r : args[2].trim().split("\\s*,\\s*")) {
+                    String[] ab = r.split("-");
+                    ranges.add(new int[]{Integer.parseInt(ab[0].trim()), (int) Math.min(Long.parseLong(ab[1].trim()), n)});
+                }
+            } else ranges.add(new int[]{0, n});
+            printPlan(cum, ranges, perJob);
+            return;
+        }
+        if (args.length >= 3 && args[0].equals("run")) {
+            START_INDEX_OVERRIDE = Long.parseLong(args[1]);
+            END_INDEX = Long.parseLong(args[2]);
+            RUN_STEP_BUDGET = Long.MAX_VALUE;
+            if (args.length > 3) MAX_RUN_MINUTES = Double.parseDouble(args[3]);
+        }
 
         System.out.println("START " + PRIMES[0] + "_" + PRIMES[PRIMES.length - 1] + "_minmax" + MIN_PRIMES_IN_SEED);
         System.out.println("Seed nella famiglia: " + n + "   passi totali: " + String.format("%,d", cum[n]));
@@ -118,7 +145,7 @@ public class TaxicabSearch {
         int[] spf = buildSpf((int) maxM);
 
         // ---- ciclo a batch ----
-        int cores = 10;
+        int cores = Runtime.getRuntime().availableProcessors();
         ExecutorService pool = Executors.newFixedThreadPool(cores);
         System.out.println("Core: " + cores);
         long t0 = System.nanoTime();
@@ -135,6 +162,15 @@ public class TaxicabSearch {
                 if (!first && (batchSteps + st > BATCH_STEPS || stepsThisRun + batchSteps + st > RUN_STEP_BUDGET)) break;
                 batchSteps += st;
                 j++;
+            }
+            // limite di tempo: non iniziare un batch che, alla velocita' attuale, sforerebbe MAX_RUN_MINUTES
+            if (MAX_RUN_MINUTES > 0 && stepsThisRun > 0) {
+                double elapsed = (System.nanoTime() - t0) / 1e9;
+                double estBatch = batchSteps / (stepsThisRun / Math.max(elapsed, 1e-9));
+                if (elapsed + estBatch > MAX_RUN_MINUTES * 60) {
+                    System.out.println("Limite di tempo (" + MAX_RUN_MINUTES + " min) raggiunto: mi fermo prima del prossimo batch.");
+                    break;
+                }
             }
             final int from = (int) idx, to = j;
 
@@ -175,6 +211,12 @@ public class TaxicabSearch {
         System.out.printf("=== Fine lancio: %,d passi in %.0f s (%.0f passi/s) ===%n", stepsThisRun, sec, stepsThisRun / Math.max(sec, 1e-9));
         System.out.println("Risultati di questo lancio: " + hitsThisRun + "  (elenco in " + RESULTS_FILE + ")");
         long remaining = cum[(int) end] - cum[(int) idx];
+        try {
+            Files.writeString(Paths.get(STATUS_FILE), (idx >= end ? "DONE" : "INCOMPLETE") + " start=" + start + " end=" + end
+                + " next=" + idx + " hits=" + hitsThisRun + "\n", StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            System.out.println("(attenzione: impossibile scrivere " + STATUS_FILE + ": " + e.getMessage() + ")");
+        }
         if (idx >= end) {
             System.out.println(sliceMode ? "Fetta completata."
                 : "FAMIGLIA COMPLETATA: tutti i " + n + " seed sono stati esplorati.");
@@ -183,6 +225,39 @@ public class TaxicabSearch {
             System.out.println("PROSSIMO LANCIO riparte dall'indice " + idx + (sliceMode ? " (imposta START_INDEX_OVERRIDE a questo valore)" : " (automatico da checkpoint)"));
             System.out.printf("Passi ancora da fare nella fetta: %,d  (~%.1f ore alla velocita' di questo lancio)%n", remaining, remaining / rate / 3600.0);
         }
+    }
+
+    // ---------------- piano delle fette (modalita' "plan") ----------------
+
+    /** Spezza [from,to) in fette contigue di ~perJob passi ciascuna e stampa la matrice JSON per GitHub Actions.
+     *  Una matrice puo' avere al massimo 256 job: se servono di piu', perJob viene alzato automaticamente. */
+    static void printPlan(long[] cum, List<int[]> ranges, long perJob) {
+        List<long[]> slices;
+        long total = 0;
+        for (int[] r : ranges) total += cum[r[1]] - cum[r[0]];
+        while (true) {
+            slices = new ArrayList<>();
+            for (int[] r : ranges) {
+                int a = r[0], to = r[1];
+                while (a < to) {
+                    int b = a + 1;
+                    while (b < to && cum[b + 1] - cum[a] <= perJob) b++;
+                    slices.add(new long[]{a, b});
+                    a = b;
+                }
+            }
+            if (slices.size() <= 256) break;
+            perJob = (long) (perJob * 1.1) + 1;
+        }
+        StringBuilder sb = new StringBuilder("{\"include\":[");
+        for (int i = 0; i < slices.size(); i++) {
+            long[] s = slices.get(i);
+            if (i > 0) sb.append(',');
+            sb.append("{\"start\":").append(s[0]).append(",\"end\":").append(s[1]).append('}');
+        }
+        sb.append("]}");
+        System.out.println(sb);
+        System.err.printf("Piano: %,d passi  ->  %d job da ~%,d passi%n", total, slices.size(), perJob);
     }
 
     // ---------------- risultati e checkpoint ----------------
