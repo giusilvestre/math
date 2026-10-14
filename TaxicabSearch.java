@@ -55,10 +55,10 @@ public class TaxicabSearch {
 
     // ============ 1) DEFINIZIONE DELLA FAMIGLIA (non cambiare tra i lanci) ============
     static final int[] PRIMES = {
-        7, 13, 19, 31, 37, 43, 61, 67, 73, 79, 97, 103, 109, 127, 139, 151, 157, 163, 181, 193, 199, 211, 223, 229, 241, 271, 277, 283,  // vecchi
-        307, 313, 331, 337, 349, 367, 373, 379, 397	// nuovi
+        7, 13, 19, 31, 37, 43, 61, 67, 73, 79, 97, 103, 109, 127, 139, 151, 157, 163, 181, 193, 199, 211, 223, 229, 241, 271, 277, 283, 307, 313, 331, 337, 349, 367, 373, 379, 397, 409, 421, 433, 439, 457, 463, 487, 499, 523, 541, 547, 571, 577,  // vecchi
+        601, 607, 613, 619, 631, 643, 661, 673, 691	// nuovi
     };
-    static final int OLD_PRIMES_COUNT = 28;
+    static final int OLD_PRIMES_COUNT = 50;
     static final int MIN_PRIMES_IN_SEED = 9;
     static final int MAX_PRIMES_IN_SEED = 9;
     static final long S_MIN = 10_000_000_000L;          // 1e10
