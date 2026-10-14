@@ -59,8 +59,8 @@ public class TaxicabSearch {
         307, 313, 331, 337, 349, 367, 373, 379, 397	// nuovi
     };
     static final int OLD_PRIMES_COUNT = 28;
-    static final int MIN_PRIMES_IN_SEED = 4;
-    static final int MAX_PRIMES_IN_SEED = 4;
+    static final int MIN_PRIMES_IN_SEED = 9;
+    static final int MAX_PRIMES_IN_SEED = 9;
     static final long S_MIN = 10_000_000_000L;          // 1e10
     static final long S_MAX = 1_000_000_000_000_000L;   // 1e15
 
