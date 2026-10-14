@@ -5,7 +5,7 @@ on:
     inputs:
       steps_per_job:
         description: "Passi per job (fette bilanciate). Piu' basso = piu' job, ognuno piu' corto"
-        default: "26000000"
+        default: "7000000"
       ranges:
         description: "Opzionale: solo questi indici, es. 1000-5000,7000-9000 (vuoto = tutta la famiglia)"
         default: ""
