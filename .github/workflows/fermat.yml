@@ -10,10 +10,10 @@ on:
     inputs:
       files:
         description: "File n da elaborare (filesN14/<n>.txt): numeri e/o intervalli, es. 563  oppure  563,570-575"
-        default: "563"
+        default: "51-100,563"
       m:
         description: "Profondita' m: passi della ruota per ogni riga del file"
-        default: "100"
+        default: "1000"
       commit_results:
         description: "Salva i file aggiornati nel repository (serve per proseguire al lancio successivo)"
         type: boolean
