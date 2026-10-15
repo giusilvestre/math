@@ -2,6 +2,11 @@ name: run-fermat
 
 # Ricerca di fattori di C12 (cofattore composto di F12) della forma k*2^14+1.
 # Ogni file filesN14/<n>.txt e' un job indipendente: avanza di m passi ogni riga e viene riscritto.
+#
+# STATO: l'avanzamento di ogni file vive nel branch "fermat-state", che contiene UN SOLO commit
+# (sovrascritto a ogni salvataggio): la cronologia non si gonfia con le vecchie versioni dei file.
+# Al primo lancio di un file si parte dalla versione presente nel branch principale.
+#
 # Salvalo come .github/workflows/fermat.yml
 run-name: Fermat N14 | file ${{ inputs.files }} | m=${{ inputs.m }}
 
@@ -10,12 +15,12 @@ on:
     inputs:
       files:
         description: "File n da elaborare (filesN14/<n>.txt): numeri e/o intervalli, es. 563  oppure  563,570-575"
-        default: "51-100,563"
+        default: "563"
       m:
         description: "Profondita' m: passi della ruota per ogni riga del file"
-        default: "1000"
-      commit_results:
-        description: "Salva i file aggiornati nel repository (serve per proseguire al lancio successivo)"
+        default: "100"
+      save_state:
+        description: "Salva l'avanzamento nel branch fermat-state (se disattivo, il lancio e' solo una prova)"
         type: boolean
         default: true
 
@@ -55,12 +60,22 @@ jobs:
     name: file ${{ matrix.n }}
     runs-on: ubuntu-latest
     timeout-minutes: 360
+    permissions:
+      contents: write   # serve per salvare lo stato nel branch fermat-state
     strategy:
       fail-fast: false
       matrix:
         n: ${{ fromJson(needs.plan.outputs.files) }}
+    env:
+      N: ${{ matrix.n }}
+      M: ${{ inputs.m }}
+      STATE_BRANCH: fermat-state
     steps:
+      # checkout parziale: solo la classe Java (i file filesN14 si prendono uno alla volta, vedi sotto)
       - uses: actions/checkout@v4
+        with:
+          sparse-checkout: /Fermat12_N14_GH.java
+          sparse-checkout-cone-mode: false
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -68,76 +83,76 @@ jobs:
       - name: Compila
         run: javac Fermat12_N14_GH.java
 
-      - name: Esegui
-        id: java
-        shell: bash   # con pipefail: se Java fallisce il passo fallisce
-        env:
-          N: ${{ matrix.n }}
-          M: ${{ inputs.m }}
+      # scarica SOLO il file di questo job: dal branch di stato se esiste, altrimenti dal branch principale
+      - name: Recupera il file di partenza
         run: |
-          test -f "filesN14/${N}.txt" || { echo "::error::Manca filesN14/${N}.txt nel repository"; exit 1; }
-          timeout 350m java -Xmx4g Fermat12_N14_GH "$N" "$M" 2>&1 | tee log.txt
-
-      - name: Riepilogo del job
-        if: always()
-        run: |
-          { echo "### File ${{ matrix.n }} (m=${{ inputs.m }})"; echo '```'; grep -E "^(START|END) N14" log.txt || echo "(nessun riepilogo: vedi log)"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-
-      # il file aggiornato si salva SOLO se Java e' finito bene (la riscrittura avviene a fine calcolo)
-      - uses: actions/upload-artifact@v4
-        if: steps.java.outcome == 'success'
-        with:
-          name: file-${{ matrix.n }}
-          path: filesN14/${{ matrix.n }}.txt
-
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: log-${{ matrix.n }}
-          path: |
-            log.txt
-            TROVATO_N14.txt
-          if-no-files-found: ignore
-
-      # se e' stato trovato qualcosa il job FALLISCE di proposito, cosi' GitHub ti manda la notifica
-      - name: Controlla se e' stato trovato un fattore
-        if: always()
-        run: |
-          if [ -f TROVATO_N14.txt ]; then
-            echo "::error::TROVATO un divisore di C12 (file ${{ matrix.n }})! Vedi l'artifact log-${{ matrix.n }} e TROVATO_N14.txt"
-            { echo "## TROVATO (file ${{ matrix.n }})"; echo '```'; cat TROVATO_N14.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          mkdir -p filesN14
+          if git fetch -q --depth=1 --filter=blob:none origin "+refs/heads/${STATE_BRANCH}:refs/remotes/origin/${STATE_BRANCH}" 2>/dev/null \
+             && [ -n "$(git ls-tree --name-only "origin/${STATE_BRANCH}" -- "filesN14/${N}.txt")" ]; then
+            git show "origin/${STATE_BRANCH}:filesN14/${N}.txt" > "filesN14/${N}.txt"
+            echo "Parto dallo stato salvato nel branch ${STATE_BRANCH}"
+          elif [ -n "$(git ls-tree --name-only HEAD -- "filesN14/${N}.txt")" ]; then
+            git show "HEAD:filesN14/${N}.txt" > "filesN14/${N}.txt"
+            echo "Primo lancio per questo file: parto dalla versione del branch principale"
+          else
+            echo "::error::filesN14/${N}.txt non esiste ne' nel branch ${STATE_BRANCH} ne' nel branch principale"
             exit 1
           fi
 
-  # 3) salva nel repo i file aggiornati, cosi' il prossimo lancio riparte da dove sei arrivato
-  save:
-    needs: run
-    if: ${{ !cancelled() && inputs.commit_results }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        continue-on-error: true   # nessun artifact se tutti i job sono falliti
-        with:
-          pattern: file-*
-          path: art
-      - name: Commit dei file aggiornati
-        env:
-          M: ${{ inputs.m }}
+      - name: Esegui
+        id: java
+        shell: bash   # con pipefail: se Java fallisce il passo fallisce
+        run: timeout 350m java -Xmx4g Fermat12_N14_GH "$N" "$M" 2>&1 | tee log.txt
+
+      # il file e' riscritto da Java solo a fine calcolo: si salva solo se Java e' finito bene
+      - name: Controlla se e' stato trovato un fattore
+        id: chk
+        if: always()
         run: |
-          mapfile -t files < <(find art -type f -name '[0-9]*.txt' 2>/dev/null)
-          if [ ${#files[@]} -eq 0 ]; then echo "Nessun file aggiornato da salvare"; exit 0; fi
-          mkdir -p filesN14
-          cp "${files[@]}" filesN14/
+          if [ -f TROVATO_N14.txt ]; then
+            echo "found=1" >> "$GITHUB_OUTPUT"
+            echo "::error title=TROVATO un divisore di C12 (file ${N})::$(tr '\n' ' ' < TROVATO_N14.txt)"
+          fi
+
+      - name: Salva l'avanzamento nel branch di stato
+        if: steps.java.outcome == 'success' && inputs.save_state
+        run: |
+          cp "filesN14/${N}.txt" "${RUNNER_TEMP}/stato.txt"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add filesN14
-          if git diff --cached --quiet; then echo "Nessuna modifica"; exit 0; fi
-          git commit -m "Fermat N14: avanzamento file ($(for f in "${files[@]}"; do basename "$f" .txt; done | paste -sd, -)) m=$M"
-          for i in 1 2 3 4 5; do
-            git pull --rebase && git push && exit 0
-            sleep $((i * 5))
+          for i in 1 2 3 4 5 6 7 8; do
+            rm -rf filesN14
+            if git fetch -q --depth=1 --filter=blob:none origin "+refs/heads/${STATE_BRANCH}:refs/remotes/origin/${STATE_BRANCH}" 2>/dev/null; then
+              # il branch esiste: si riparte dal suo unico commit e lo si riscrive (--amend)
+              git checkout -q -f -B "${STATE_BRANCH}" "origin/${STATE_BRANCH}"
+              LEASE="--force-with-lease=${STATE_BRANCH}:$(git rev-parse "origin/${STATE_BRANCH}")"
+              AMEND="--amend"
+            else
+              # primo salvataggio in assoluto: si crea il branch da zero
+              git checkout -q --detach
+              git branch -D "${STATE_BRANCH}" 2>/dev/null || true
+              git checkout -q --orphan "${STATE_BRANCH}"
+              git read-tree --empty
+              LEASE=""
+              AMEND=""
+            fi
+            mkdir -p filesN14
+            cp "${RUNNER_TEMP}/stato.txt" "filesN14/${N}.txt"
+            # --sparse: gli altri file del branch di stato non sono nel checkout, restano com'erano
+            git add --sparse "filesN14/${N}.txt"
+            git commit -q ${AMEND} -m "Fermat N14: stato (ultimo aggiornamento: file ${N}, m=${M})"
+            if git push -q ${LEASE} origin "${STATE_BRANCH}"; then
+              echo "Stato del file ${N} salvato nel branch ${STATE_BRANCH}"
+              exit 0
+            fi
+            echo "Push rifiutato (un altro job ha aggiornato il branch): riprovo ($i/8)"
+            sleep $((RANDOM % 15 + 5))
           done
+          echo "::error::Impossibile salvare lo stato dopo 8 tentativi"
           exit 1
+
+      # se e' stato trovato qualcosa il job FALLISCE di proposito (dopo aver salvato lo stato),
+      # cosi' GitHub ti manda la notifica di workflow fallito
+      - name: Segnala il ritrovamento
+        if: always() && steps.chk.outputs.found == '1'
+        run: exit 1
