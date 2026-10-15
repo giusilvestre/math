@@ -1,0 +1,143 @@
+name: run-fermat
+
+# Ricerca di fattori di C12 (cofattore composto di F12) della forma k*2^14+1.
+# Ogni file filesN14/<n>.txt e' un job indipendente: avanza di m passi ogni riga e viene riscritto.
+# Salvalo come .github/workflows/fermat.yml
+run-name: Fermat N14 | file ${{ inputs.files }} | m=${{ inputs.m }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      files:
+        description: "File n da elaborare (filesN14/<n>.txt): numeri e/o intervalli, es. 563  oppure  563,570-575"
+        default: "563"
+      m:
+        description: "Profondita' m: passi della ruota per ogni riga del file"
+        default: "100"
+      commit_results:
+        description: "Salva i file aggiornati nel repository (serve per proseguire al lancio successivo)"
+        type: boolean
+        default: true
+
+jobs:
+  # 1) trasforma "563,570-575" nella lista dei file, uno per job
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      files: ${{ steps.p.outputs.files }}
+    steps:
+      - id: p
+        env:
+          FILES: ${{ inputs.files }}
+        run: |
+          python3 - <<'EOF' >> "$GITHUB_OUTPUT"
+          import json, os, re
+          out = []
+          for part in re.split(r"[,\s]+", os.environ["FILES"].strip()):
+              if not part:
+                  continue
+              m = re.fullmatch(r"(\d+)-(\d+)", part)
+              if m:
+                  out += range(int(m[1]), int(m[2]) + 1)
+              elif part.isdigit():
+                  out.append(int(part))
+              else:
+                  raise SystemExit("formato non valido: " + part)
+          out = sorted(set(out))
+          if not 1 <= len(out) <= 256:
+              raise SystemExit("servono da 1 a 256 file")
+          print("files=" + json.dumps(out))
+          EOF
+
+  # 2) un job per file n (quelli oltre il limite di job contemporanei restano in coda)
+  run:
+    needs: plan
+    name: file ${{ matrix.n }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        n: ${{ fromJson(needs.plan.outputs.files) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Compila
+        run: javac Fermat12_N14_GH.java
+
+      - name: Esegui
+        id: java
+        shell: bash   # con pipefail: se Java fallisce il passo fallisce
+        env:
+          N: ${{ matrix.n }}
+          M: ${{ inputs.m }}
+        run: |
+          test -f "filesN14/${N}.txt" || { echo "::error::Manca filesN14/${N}.txt nel repository"; exit 1; }
+          timeout 350m java -Xmx4g Fermat12_N14_GH "$N" "$M" 2>&1 | tee log.txt
+
+      - name: Riepilogo del job
+        if: always()
+        run: |
+          { echo "### File ${{ matrix.n }} (m=${{ inputs.m }})"; echo '```'; grep -E "^(START|END) N14" log.txt || echo "(nessun riepilogo: vedi log)"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      # il file aggiornato si salva SOLO se Java e' finito bene (la riscrittura avviene a fine calcolo)
+      - uses: actions/upload-artifact@v4
+        if: steps.java.outcome == 'success'
+        with:
+          name: file-${{ matrix.n }}
+          path: filesN14/${{ matrix.n }}.txt
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: log-${{ matrix.n }}
+          path: |
+            log.txt
+            TROVATO_N14.txt
+          if-no-files-found: ignore
+
+      # se e' stato trovato qualcosa il job FALLISCE di proposito, cosi' GitHub ti manda la notifica
+      - name: Controlla se e' stato trovato un fattore
+        if: always()
+        run: |
+          if [ -f TROVATO_N14.txt ]; then
+            echo "::error::TROVATO un divisore di C12 (file ${{ matrix.n }})! Vedi l'artifact log-${{ matrix.n }} e TROVATO_N14.txt"
+            { echo "## TROVATO (file ${{ matrix.n }})"; echo '```'; cat TROVATO_N14.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+  # 3) salva nel repo i file aggiornati, cosi' il prossimo lancio riparte da dove sei arrivato
+  save:
+    needs: run
+    if: ${{ !cancelled() && inputs.commit_results }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        continue-on-error: true   # nessun artifact se tutti i job sono falliti
+        with:
+          pattern: file-*
+          path: art
+      - name: Commit dei file aggiornati
+        env:
+          M: ${{ inputs.m }}
+        run: |
+          mapfile -t files < <(find art -type f -name '[0-9]*.txt' 2>/dev/null)
+          if [ ${#files[@]} -eq 0 ]; then echo "Nessun file aggiornato da salvare"; exit 0; fi
+          mkdir -p filesN14
+          cp "${files[@]}" filesN14/
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add filesN14
+          if git diff --cached --quiet; then echo "Nessuna modifica"; exit 0; fi
+          git commit -m "Fermat N14: avanzamento file ($(for f in "${files[@]}"; do basename "$f" .txt; done | paste -sd, -)) m=$M"
+          for i in 1 2 3 4 5; do
+            git pull --rebase && git push && exit 0
+            sleep $((i * 5))
+          done
+          exit 1
