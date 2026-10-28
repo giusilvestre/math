@@ -1,4 +1,4 @@
-name: run-fermat
+name: run-fermat-12-14
 
 # Ricerca di fattori di C12 (cofattore composto di F12) della forma k*2^14+1.
 # Ogni file filesN14/<n>.txt e' un job indipendente: avanza di m passi ogni riga e viene riscritto.
