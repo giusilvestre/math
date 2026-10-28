@@ -1,20 +1,20 @@
 name: run-fermat
 
-# Ricerca di fattori di C12 (cofattore composto di F12) della forma k*2^14+1.
-# Ogni file filesN14/<n>.txt e' un job indipendente: avanza di m passi ogni riga e viene riscritto.
+# Ricerca di fattori di C12 (cofattore composto di F12) della forma k*2^16+1.
+# Ogni file filesN16/<n>.txt e' un job indipendente: avanza di m passi ogni riga e viene riscritto.
 #
 # STATO: l'avanzamento di ogni file vive nel branch "fermat-state", che contiene UN SOLO commit
 # (sovrascritto a ogni salvataggio): la cronologia non si gonfia con le vecchie versioni dei file.
 # Al primo lancio di un file si parte dalla versione presente nel branch principale.
 #
-# Salvalo come .github/workflows/fermat.yml
-run-name: Fermat N14 | file ${{ inputs.files }} | m=${{ inputs.m }}
+# Salvalo come .github/workflows/fermat_12_16.yml
+run-name: Fermat N16 | file ${{ inputs.files }} | m=${{ inputs.m }}
 
 on:
   workflow_dispatch:
     inputs:
       files:
-        description: "File n da elaborare (filesN14/<n>.txt): numeri e/o intervalli, es. 563  oppure  563,570-575"
+        description: "File n da elaborare (filesN16/<n>.txt): numeri e/o intervalli, es. 563  oppure  563,570-575"
         default: "563"
       m:
         description: "Profondita' m: passi della ruota per ogni riga del file"
@@ -71,57 +71,57 @@ jobs:
       M: ${{ inputs.m }}
       STATE_BRANCH: fermat-state
     steps:
-      # checkout parziale: solo la classe Java (i file filesN14 si prendono uno alla volta, vedi sotto)
+      # checkout parziale: solo la classe Java (i file filesN16 si prendono uno alla volta, vedi sotto)
       - uses: actions/checkout@v4
         with:
-          sparse-checkout: /Fermat12_N14_GH.java
+          sparse-checkout: /Fermat12_N16_GH.java
           sparse-checkout-cone-mode: false
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
       - name: Compila
-        run: javac Fermat12_N14_GH.java
+        run: javac Fermat12_N16_GH.java
 
       # scarica SOLO il file di questo job: dal branch di stato se esiste, altrimenti dal branch principale
       - name: Recupera il file di partenza
         run: |
-          mkdir -p filesN14
+          mkdir -p filesN16
           if git fetch -q --depth=1 --filter=blob:none origin "+refs/heads/${STATE_BRANCH}:refs/remotes/origin/${STATE_BRANCH}" 2>/dev/null \
-             && [ -n "$(git ls-tree --name-only "origin/${STATE_BRANCH}" -- "filesN14/${N}.txt")" ]; then
-            git show "origin/${STATE_BRANCH}:filesN14/${N}.txt" > "filesN14/${N}.txt"
+             && [ -n "$(git ls-tree --name-only "origin/${STATE_BRANCH}" -- "filesN16/${N}.txt")" ]; then
+            git show "origin/${STATE_BRANCH}:filesN16/${N}.txt" > "filesN16/${N}.txt"
             echo "Parto dallo stato salvato nel branch ${STATE_BRANCH}"
-          elif [ -n "$(git ls-tree --name-only HEAD -- "filesN14/${N}.txt")" ]; then
-            git show "HEAD:filesN14/${N}.txt" > "filesN14/${N}.txt"
+          elif [ -n "$(git ls-tree --name-only HEAD -- "filesN16/${N}.txt")" ]; then
+            git show "HEAD:filesN16/${N}.txt" > "filesN16/${N}.txt"
             echo "Primo lancio per questo file: parto dalla versione del branch principale"
           else
-            echo "::error::filesN14/${N}.txt non esiste ne' nel branch ${STATE_BRANCH} ne' nel branch principale"
+            echo "::error::filesN16/${N}.txt non esiste ne' nel branch ${STATE_BRANCH} ne' nel branch principale"
             exit 1
           fi
 
       - name: Esegui
         id: java
         shell: bash   # con pipefail: se Java fallisce il passo fallisce
-        run: timeout 350m java -Xmx4g Fermat12_N14_GH "$N" "$M" 2>&1 | tee log.txt
+        run: timeout 350m java -Xmx4g Fermat12_N16_GH "$N" "$M" 2>&1 | tee log.txt
 
       # il file e' riscritto da Java solo a fine calcolo: si salva solo se Java e' finito bene
       - name: Controlla se e' stato trovato un fattore
         id: chk
         if: always()
         run: |
-          if [ -f TROVATO_N14.txt ]; then
+          if [ -f TROVATO_N16.txt ]; then
             echo "found=1" >> "$GITHUB_OUTPUT"
-            echo "::error title=TROVATO un divisore di C12 (file ${N})::$(tr '\n' ' ' < TROVATO_N14.txt)"
+            echo "::error title=TROVATO un divisore di C12 (file ${N})::$(tr '\n' ' ' < TROVATO_N16.txt)"
           fi
 
       - name: Salva l'avanzamento nel branch di stato
         if: steps.java.outcome == 'success' && inputs.save_state
         run: |
-          cp "filesN14/${N}.txt" "${RUNNER_TEMP}/stato.txt"
+          cp "filesN16/${N}.txt" "${RUNNER_TEMP}/stato.txt"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           for i in 1 2 3 4 5 6 7 8; do
-            rm -rf filesN14
+            rm -rf filesN16
             if git fetch -q --depth=1 --filter=blob:none origin "+refs/heads/${STATE_BRANCH}:refs/remotes/origin/${STATE_BRANCH}" 2>/dev/null; then
               # il branch esiste: si riparte dal suo unico commit e lo si riscrive (--amend)
               git checkout -q -f -B "${STATE_BRANCH}" "origin/${STATE_BRANCH}"
@@ -136,11 +136,11 @@ jobs:
               LEASE=""
               AMEND=""
             fi
-            mkdir -p filesN14
-            cp "${RUNNER_TEMP}/stato.txt" "filesN14/${N}.txt"
+            mkdir -p filesN16
+            cp "${RUNNER_TEMP}/stato.txt" "filesN16/${N}.txt"
             # --sparse: gli altri file del branch di stato non sono nel checkout, restano com'erano
-            git add --sparse "filesN14/${N}.txt"
-            git commit -q ${AMEND} -m "Fermat N14: stato (ultimo aggiornamento: file ${N}, m=${M})"
+            git add --sparse "filesN16/${N}.txt"
+            git commit -q ${AMEND} -m "Fermat N16: stato (ultimo aggiornamento: file ${N}, m=${M})"
             if git push -q ${LEASE} origin "${STATE_BRANCH}"; then
               echo "Stato del file ${N} salvato nel branch ${STATE_BRANCH}"
               exit 0
