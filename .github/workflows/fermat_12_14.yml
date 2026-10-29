@@ -7,7 +7,7 @@ name: run-fermat-12-14
 # (sovrascritto a ogni salvataggio): la cronologia non si gonfia con le vecchie versioni dei file.
 # Al primo lancio di un file si parte dalla versione presente nel branch principale.
 #
-# Salvalo come .github/workflows/fermat_12_14.yml
+# Salvalo come .github/workflows/fermat.yml
 run-name: Fermat N14 | file ${{ inputs.files }} | m=${{ inputs.m }}
 
 on:
@@ -111,17 +111,58 @@ jobs:
         run: |
           if [ -f TROVATO_N14.txt ]; then
             echo "found=1" >> "$GITHUB_OUTPUT"
-            echo "::error title=TROVATO un divisore di C12 (file ${N})::$(tr '\n' ' ' < TROVATO_N14.txt)"
+            # TROVATO_N14.txt contiene solo l'ULTIMO ritrovamento (Java lo riscrive): il log li ha tutti
+            grep -F -A3 "TROVATO N14" log.txt > "${RUNNER_TEMP}/trovati.txt" || true
+            [ -s "${RUNNER_TEMP}/trovati.txt" ] || cp TROVATO_N14.txt "${RUNNER_TEMP}/trovati.txt"
+            echo "::error title=TROVATO un divisore di C12 (file ${N})::$(tr '\n' ' ' < "${RUNNER_TEMP}/trovati.txt")"
           fi
+
+      # il ritrovamento va in un branch a parte, "fermat-trovato", dove si aggiungono solo commit
+      # (mai riscritto): il file TROVATO_N14.txt altrimenti sparirebbe con il runner
+      - name: Salva il ritrovamento nel branch fermat-trovato
+        if: always() && steps.chk.outputs.found == '1'
+        continue-on-error: true   # un problema qui non deve impedire di salvare lo stato
+        run: |
+          FOUND_BRANCH=fermat-trovato
+          NAME="TROVATO_N14_file${N}_$(date -u +%Y%m%dT%H%M%SZ).txt"
+          cp TROVATO_N14.txt "${RUNNER_TEMP}/trovato.txt"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for i in 1 2 3 4 5 6 7 8; do
+            git checkout -q --detach
+            if git fetch -q --depth=1 --filter=blob:none origin "+refs/heads/${FOUND_BRANCH}:refs/remotes/origin/${FOUND_BRANCH}" 2>/dev/null; then
+              git checkout -q -f -B "${FOUND_BRANCH}" "origin/${FOUND_BRANCH}"
+            else
+              git branch -D "${FOUND_BRANCH}" 2>/dev/null || true
+              git checkout -q --orphan "${FOUND_BRANCH}"
+              git read-tree --empty
+            fi
+            cp "${RUNNER_TEMP}/trovato.txt" "${NAME}"
+            git add --sparse "${NAME}"
+            git commit -q -m "TROVATO divisore di C12 (file ${N}, m=${M})"
+            if git push -q origin "${FOUND_BRANCH}"; then
+              echo "Ritrovamento salvato nel branch ${FOUND_BRANCH}: ${NAME}"
+              exit 0
+            fi
+            echo "Push rifiutato: riprovo ($i/8)"
+            sleep $((RANDOM % 15 + 5))
+          done
+          echo "::error::Impossibile salvare il ritrovamento nel branch ${FOUND_BRANCH} (e' comunque nel log e nell'annotazione)"
+          exit 1
 
       - name: Salva l'avanzamento nel branch di stato
         if: steps.java.outcome == 'success' && inputs.save_state
         run: |
           cp "filesN14/${N}.txt" "${RUNNER_TEMP}/stato.txt"
+          # se e' stato trovato un fattore, il ritrovamento si salva nello stesso branch, in trovato/
+          TNAME=""
+          if [ -s "${RUNNER_TEMP}/trovati.txt" ]; then
+            TNAME="trovato/${N}_$(date -u +%Y%m%d-%H%M%S).txt"
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           for i in 1 2 3 4 5 6 7 8; do
-            rm -rf filesN14
+            rm -rf filesN14 trovato
             if git fetch -q --depth=1 --filter=blob:none origin "+refs/heads/${STATE_BRANCH}:refs/remotes/origin/${STATE_BRANCH}" 2>/dev/null; then
               # il branch esiste: si riparte dal suo unico commit e lo si riscrive (--amend)
               git checkout -q -f -B "${STATE_BRANCH}" "origin/${STATE_BRANCH}"
@@ -140,7 +181,14 @@ jobs:
             cp "${RUNNER_TEMP}/stato.txt" "filesN14/${N}.txt"
             # --sparse: gli altri file del branch di stato non sono nel checkout, restano com'erano
             git add --sparse "filesN14/${N}.txt"
-            git commit -q ${AMEND} -m "Fermat N14: stato (ultimo aggiornamento: file ${N}, m=${M})"
+            MSG="Fermat N14: stato (ultimo aggiornamento: file ${N}, m=${M})"
+            if [ -n "${TNAME}" ]; then
+              mkdir -p trovato
+              cp "${RUNNER_TEMP}/trovati.txt" "${TNAME}"
+              git add --sparse "${TNAME}"
+              MSG="${MSG} - TROVATO un divisore, vedi ${TNAME}"
+            fi
+            git commit -q ${AMEND} -m "${MSG}"
             if git push -q ${LEASE} origin "${STATE_BRANCH}"; then
               echo "Stato del file ${N} salvato nel branch ${STATE_BRANCH}"
               exit 0
