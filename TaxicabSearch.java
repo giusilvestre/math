@@ -1,5 +1,4 @@
 
-
 import java.io.IOException;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
@@ -16,11 +15,18 @@ import java.util.concurrent.Future;
  * IDEA. Ogni intero si scrive in modo unico come N = M^3 * s con s libero da cubi.
  * Da N = 2m(m^2+3h^2) i fattori di m^2+3h^2 (m,h coprimi) sono 3 oppure primi = 1 (mod 3).
  * Il Ta(7) noto e' 670236^3 * s0, s0 = 7*13*19*43*73*97*157 (sette primi = 1 mod 3).
- * Si esplorano quindi i seed s SQUAREFREE, prodotto di >= MIN_PRIMES_IN_SEED primi
+ * Si esplorano quindi i seed s SQUAREFREE, prodotto di MIN..MAX_PRIMES_IN_SEED primi
  * di PRIMES, con S_MIN <= s <= S_MAX. Per ogni seed si provano TUTTI gli M da 2 fino a
  * cbrt(bound/s) (oltre, N supererebbe il bound noto: inutile). Per ogni (s,M) il test
  * e' ESATTO (mediane m = mu*d, mu | M^3, d | s; divisibilita' + quadrato perfetto).
  * E' un'euristica sulla famiglia dei seed: NON e' una ricerca esaustiva di Ta(7).
+ *
+ * CONFIGURAZIONE DELLA FAMIGLIA (variabili d'ambiente, valorizzate dal workflow):
+ *   PRIMES_SET        ultimo primo dell'insieme scelto: 283, 397, 499, 577, 691, 787, 883, 997
+ *                     (determina PRIMES e OLD_PRIMES_COUNT, vedi ALL_PRIMES / BOUNDS)
+ *   MIN_PRIMES_IN_SEED  minimo numero di primi nel seed (default 8)
+ *   MAX_PRIMES_IN_SEED  massimo numero di primi nel seed (default 8)
+ * Se non sono impostate (uso da IDE) valgono i default: 787 / 8 / 8.
  *
  * COME FUNZIONA IL "RILANCIO". La famiglia viene generata e ORDINATA in modo
  * deterministico (per costo crescente: prima i seed con M massimo piccolo). Ogni seed ha
@@ -41,26 +47,36 @@ import java.util.concurrent.Future;
  *  C) Test rapido: il programma stampa l'indice del seed s0 del Ta(7) noto. Imposta
  *     START = quell'indice, END = START+1: deve trovare N = bound noto con M=670236.
  *
- * REGOLA D'ORO: non cambiare PRIMES, MIN_PRIMES_IN_SEED, S_MIN, S_MAX tra un lancio e
- * l'altro dello stesso ciclo: gli indici cambierebbero significato. Il checkpoint contiene
+ * REGOLA D'ORO: non cambiare PRIMES_SET, MIN/MAX_PRIMES_IN_SEED, S_MIN, S_MAX tra un lancio
+ * e l'altro dello stesso ciclo: gli indici cambierebbero significato. Il checkpoint contiene
  * una "impronta" della famiglia e il programma si rifiuta di proseguire se non coincide.
- * Per esplorare un'altra famiglia (altri primi, altro intervallo) cambia anche
- * CHECKPOINT_FILE e RESULTS_FILE (o cancella il vecchio checkpoint).
+ * I nomi di CHECKPOINT_FILE e RESULTS_FILE dipendono da primo minimo/massimo e MIN_PRIMES.
  *
  * I risultati (N con >= 7 rappresentazioni) vengono aggiunti a RESULTS_FILE.
- * Nessun argomento da riga di comando. Richiede Java 16+.
+ * Da riga di comando: "plan" e "run" (vedi main). Richiede Java 16+.
  */
 public class TaxicabSearch {
 
-
     // ============ 1) DEFINIZIONE DELLA FAMIGLIA (non cambiare tra i lanci) ============
-    static final int[] PRIMES = {
-        7, 13, 19, 31, 37, 43, 61, 67, 73, 79, 97, 103, 109, 127, 139, 151, 157, 163, 181, 193, 199, 211, 223, 229, 241, 271, 277, 283, 307, 313, 331, 337, 349, 367, 373, 379, 397, 409, 421, 433, 439, 457, 463, 487, 499, 523, 541, 547, 571, 577, 601, 607, 613, 619, 631, 643, 661, 673, 691,  // vecchi
-        709, 727, 733, 739, 751, 757, 769, 787	// nuovi
+    /** Tutti i primi ammessi, in ordine. Ogni insieme selezionabile e' un prefisso di questo array. */
+    static final int[] ALL_PRIMES = {
+        7, 13, 19, 31, 37, 43, 61, 67, 73, 79, 97, 103, 109, 127, 139, 151, 157,            // 17
+        163, 181, 193, 199, 211, 223, 229, 241, 271, 277, 283,                              // 28
+        307, 313, 331, 337, 349, 367, 373, 379, 397,                                        // 37
+        409, 421, 433, 439, 457, 463, 487, 499,                                             // 45
+        523, 541, 547, 571, 577,                                                            // 50
+        601, 607, 613, 619, 631, 643, 661, 673, 691,                                        // 59
+        709, 727, 733, 739, 751, 757, 769, 787,                                             // 67
+        811, 823, 829, 853, 859, 877, 883,                                                  // 74
+        907, 919, 937, 967, 991, 997                                                        // 80
     };
-    static final int OLD_PRIMES_COUNT = 59;
-    static final int MIN_PRIMES_IN_SEED = 8;
-    static final int MAX_PRIMES_IN_SEED = 8;
+    /** Confini cumulativi: la scelta k usa i primi BOUNDS[k+1] primi, di cui BOUNDS[k] sono "vecchi". */
+    static final int[] BOUNDS = {17, 28, 37, 45, 50, 59, 67, 74, 80};
+
+    static int[] PRIMES;                // impostato da configure()
+    static int OLD_PRIMES_COUNT;        // impostato da configure()
+    static int MIN_PRIMES_IN_SEED;      // impostato da configure()
+    static int MAX_PRIMES_IN_SEED;      // impostato da configure()
     static final long S_MIN = 10_000_000_000L;          // 1e10
     static final long S_MAX = 1_000_000_000_000_000L;   // 1e15
 
@@ -73,22 +89,56 @@ public class TaxicabSearch {
     static double MAX_RUN_MINUTES = 0;                  // 0 = nessun limite di tempo; >0 = stop a fine batch utile
     static final long BATCH_STEPS = 10_000_000L;         // granularita' di checkpoint / controllo tempo
     static final String STATUS_FILE = "status.txt";     // scritto a fine lancio (DONE / INCOMPLETE nextIndex=...)
-    static final String CHECKPOINT_FILE = "checkpoint_" + PRIMES[0] + "_" + PRIMES[PRIMES.length - 1] + "_minmax" + MIN_PRIMES_IN_SEED + ".txt";
-    static final String RESULTS_FILE = "hits_" + PRIMES[0] + "_" + PRIMES[PRIMES.length - 1] + "_minmax" + MIN_PRIMES_IN_SEED + ".txt";
+    static String CHECKPOINT_FILE;                      // impostato da configure()
+    static String RESULTS_FILE;                         // impostato da configure()
 
     // ============ costanti del problema ============
     static final int TARGET_WAYS = 7;
     static final BigInteger CURRENT_BEST = new BigInteger("24885189317885898975235988544");
     static final long M0 = 670236L;                                 // Ta(7) noto = M0^3 * S0
 
+    /** Legge la configurazione della famiglia dalle variabili d'ambiente (con default) e ricava PRIMES e OLD_PRIMES_COUNT. */
+    static void configure() {
+        int lastPrime = envInt("PRIMES_SET", 787);
+        MIN_PRIMES_IN_SEED = envInt("MIN_PRIMES_IN_SEED", 8);
+        MAX_PRIMES_IN_SEED = envInt("MAX_PRIMES_IN_SEED", 8);
+        if (MIN_PRIMES_IN_SEED < 1 || MAX_PRIMES_IN_SEED < MIN_PRIMES_IN_SEED)
+            throw new IllegalArgumentException("MIN_PRIMES_IN_SEED (" + MIN_PRIMES_IN_SEED + ") deve essere >= 1 e <= MAX_PRIMES_IN_SEED (" + MAX_PRIMES_IN_SEED + ")");
+        int k = -1;
+        for (int i = 0; i + 1 < BOUNDS.length; i++)
+            if (ALL_PRIMES[BOUNDS[i + 1] - 1] == lastPrime) k = i;
+        if (k < 0) {
+            StringBuilder ok = new StringBuilder();
+            for (int i = 1; i < BOUNDS.length; i++) ok.append(ALL_PRIMES[BOUNDS[i] - 1]).append(i + 1 < BOUNDS.length ? ", " : "");
+            throw new IllegalArgumentException("PRIMES_SET=" + lastPrime + " non valido. Valori ammessi: " + ok);
+        }
+        PRIMES = Arrays.copyOf(ALL_PRIMES, BOUNDS[k + 1]);
+        OLD_PRIMES_COUNT = BOUNDS[k];
+        String tag = PRIMES[0] + "_" + PRIMES[PRIMES.length - 1] + "_min" + MIN_PRIMES_IN_SEED + "max" + MAX_PRIMES_IN_SEED;
+        CHECKPOINT_FILE = "checkpoint_" + tag + ".txt";
+        RESULTS_FILE = "hits_" + tag + ".txt";
+    }
+
+    static int envInt(String name, int def) {
+        String v = System.getenv(name);
+        return (v == null || v.isBlank()) ? def : Integer.parseInt(v.trim());
+    }
+
     public static void main(String[] args) throws Exception {
+        configure();
+
         // ---- famiglia ordinata deterministicamente ----
-        List<long[]> fam = new ArrayList<>();               // {s, maschera primi, mLimit}
-        genSeeds(0, 1L, 0, 0L, fam);
-        fam.sort((x, y) -> x[2] != y[2] ? Long.compare(x[2], y[2]) : Long.compare(x[0], y[0]));
+        List<long[]> fam = new ArrayList<>();               // {s, mLimit}
+        genSeeds(0, 1L, 0, false, fam);
+        fam.sort((x, y) -> x[1] != y[1] ? Long.compare(x[1], y[1]) : Long.compare(x[0], y[0]));
         int n = fam.size();
+        if (n == 0) {
+            System.err.println("Famiglia VUOTA con questi parametri (primi fino a " + PRIMES[PRIMES.length - 1]
+                + ", " + MIN_PRIMES_IN_SEED + ".." + MAX_PRIMES_IN_SEED + " primi per seed): niente da fare.");
+            System.exit(1);
+        }
         long[] cum = new long[n + 1];                        // passi cumulati (M=2..mLimit => mLimit-1 passi)
-        for (int i = 0; i < n; i++) cum[i + 1] = cum[i] + Math.max(0, fam.get(i)[2] - 1);
+        for (int i = 0; i < n; i++) cum[i + 1] = cum[i] + Math.max(0, fam.get(i)[1] - 1);
         String fingerprint = "primes=" + Arrays.toString(PRIMES) + ";oldPrimesCount=" + OLD_PRIMES_COUNT
                 + ";minPrimes=" + MIN_PRIMES_IN_SEED + ";maxPrimes=" + MAX_PRIMES_IN_SEED
                 + ";sMin=" + S_MIN + ";sMax=" + S_MAX + ";size=" + n + ";steps=" + cum[n];
@@ -116,7 +166,8 @@ public class TaxicabSearch {
             if (args.length > 3) MAX_RUN_MINUTES = Double.parseDouble(args[3]);
         }
 
-        System.out.println("START " + PRIMES[0] + "_" + PRIMES[PRIMES.length - 1] + "_minmax" + MIN_PRIMES_IN_SEED);
+        System.out.println("START " + PRIMES[0] + "_" + PRIMES[PRIMES.length - 1] + "_min" + MIN_PRIMES_IN_SEED + "max" + MAX_PRIMES_IN_SEED
+            + "   (primi: " + PRIMES.length + ", vecchi: " + OLD_PRIMES_COUNT + ")");
         System.out.println("Seed nella famiglia: " + n + "   passi totali: " + String.format("%,d", cum[n]));
 
         // ---- fetta di questo lancio ----
@@ -141,7 +192,7 @@ public class TaxicabSearch {
             + String.format("%,d", RUN_STEP_BUDGET));
 
         // ---- crivello (dimensionato sul massimo M realmente necessario) ----
-        long maxM = Math.max(fam.get(n - 1)[2], M0);
+        long maxM = Math.max(fam.get(n - 1)[1], M0);
         int[] spf = buildSpf((int) maxM);
 
         // ---- ciclo a batch ----
@@ -180,12 +231,14 @@ public class TaxicabSearch {
                 final long[] f = fam.get(i);
                 final int seedIndex = i;
                 futs.add(pool.submit(() -> {
+                    // fattorizza il seed (squarefree, prodotto di primi di PRIMES) per divisione
                     Map<BigInteger, Integer> fac = new TreeMap<>();
-                    for (int b = 0; b < PRIMES.length; b++)
-                        if ((f[1] >> b & 1L) != 0) fac.put(BigInteger.valueOf(PRIMES[b]), 1);
+                    long rem = f[0];
+                    for (int p : PRIMES)
+                        if (rem % p == 0) { fac.put(BigInteger.valueOf(p), 1); rem /= p; }
                     BigInteger sv = BigInteger.valueOf(f[0]);
                     BigInteger[] dv = divisorsSorted(fac);
-                    for (long m = 2; m <= f[2]; m++) {
+                    for (long m = 2; m <= f[1]; m++) {
                         List<BigInteger[]> reps = searchRepresentations(m, sv, dv, spf);
                         if (reps.size() >= TARGET_WAYS)
                             hits.add(new Object[]{seedIndex, sv, m, BigInteger.valueOf(m).pow(3).multiply(sv), reps});
@@ -292,7 +345,7 @@ public class TaxicabSearch {
         if (fp == null || next == null) throw new IllegalStateException("Checkpoint illeggibile: " + CHECKPOINT_FILE);
         if (!fp.equals(fingerprint)) {
             throw new IllegalStateException("Il checkpoint " + CHECKPOINT_FILE + " appartiene a una famiglia DIVERSA da quella "
-                + "configurata (PRIMES / MIN_PRIMES_IN_SEED / S_MIN / S_MAX cambiati?).\n  checkpoint: " + fp
+                + "configurata (PRIMES_SET / MIN_PRIMES_IN_SEED / MAX_PRIMES_IN_SEED / S_MIN / S_MAX cambiati?).\n  checkpoint: " + fp
                 + "\n  attuale:    " + fingerprint + "\nRipristina i parametri oppure usa un altro CHECKPOINT_FILE.");
         }
         return next;
@@ -307,19 +360,19 @@ public class TaxicabSearch {
 
     // ---------------- famiglia di seed ----------------
 
-    /** Sottoinsiemi di PRIMES con >= MIN_PRIMES_IN_SEED primi e S_MIN <= s <= S_MAX; mLimit = cbrt(bound/s). */
-    static void genSeeds(int i, long s, int k, long mask, List<long[]> out) {
-        if (s > S_MAX) return;
+    /** Sottoinsiemi di PRIMES con MIN..MAX_PRIMES_IN_SEED primi, almeno un primo "nuovo" (indice >= OLD_PRIMES_COUNT)
+     *  e S_MIN <= s <= S_MAX; mLimit = cbrt(bound/s). Output: {s, mLimit}. */
+    static void genSeeds(int i, long s, int k, boolean hasNewPrime, List<long[]> out) {
+        if (s > S_MAX || k > MAX_PRIMES_IN_SEED) return;
         if (i == PRIMES.length) {
-            boolean hasNewPrime = (mask >>> OLD_PRIMES_COUNT) != 0L;
-            if (k >= MIN_PRIMES_IN_SEED && k <= MAX_PRIMES_IN_SEED && s >= S_MIN && hasNewPrime) {
+            if (k >= MIN_PRIMES_IN_SEED && s >= S_MIN && hasNewPrime) {
                 long mLimit = cbrtFloor(CURRENT_BEST.divide(BigInteger.valueOf(s))).longValueExact();
-                out.add(new long[]{s, mask, mLimit});
+                out.add(new long[]{s, mLimit});
             }
             return;
         }
-        genSeeds(i + 1, s, k, mask, out);
-        genSeeds(i + 1, s * PRIMES[i], k + 1, mask | (1L << i), out);
+        genSeeds(i + 1, s, k, hasNewPrime, out);
+        genSeeds(i + 1, s * PRIMES[i], k + 1, hasNewPrime || i >= OLD_PRIMES_COUNT, out);
     }
 
     // ---------------- nucleo: test ESATTO per N = M^3 * s ----------------

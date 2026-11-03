@@ -3,12 +3,39 @@ name: run-taxicab
 on:
   workflow_dispatch:
     inputs:
+      primes_set:
+        description: "Insieme di PRIMES (ultimo primo incluso). Determina anche OLD_PRIMES_COUNT: 283=17, 397=28, 499=37, 577=45, 691=50, 787=59, 883=67, 997=74"
+        type: choice
+        default: "787"
+        options:
+          - "283"
+          - "397"
+          - "499"
+          - "577"
+          - "691"
+          - "787"
+          - "883"
+          - "997"
+      min_primes:
+        description: "MIN_PRIMES_IN_SEED (numero minimo di primi nel seed)"
+        default: "8"
+      max_primes:
+        description: "MAX_PRIMES_IN_SEED (numero massimo di primi nel seed)"
+        default: "8"
       steps_per_job:
         description: "Passi per job (fette bilanciate). Piu' basso = piu' job, ognuno piu' corto"
-        default: "7000000"
+        default: "250000000"
       ranges:
         description: "Opzionale: solo questi indici, es. 1000-5000,7000-9000 (vuoto = tutta la famiglia)"
         default: ""
+
+permissions:
+  contents: read
+
+env:
+  PRIMES_SET: ${{ inputs.primes_set }}
+  MIN_PRIMES_IN_SEED: ${{ inputs.min_primes }}
+  MAX_PRIMES_IN_SEED: ${{ inputs.max_primes }}
 
 jobs:
   # 1) calcola da solo le fette (indici start/end) e crea la matrice
@@ -19,6 +46,9 @@ jobs:
       count: ${{ steps.m.outputs.count }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          sparse-checkout: TaxicabSearch.java
+          sparse-checkout-cone-mode: false
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -45,6 +75,9 @@ jobs:
       matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          sparse-checkout: TaxicabSearch.java
+          sparse-checkout-cone-mode: false
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -79,6 +112,7 @@ jobs:
         run: |
           {
             echo "## Riepilogo"
+            echo "- Insieme PRIMES: fino a ${PRIMES_SET}, seed con ${MIN_PRIMES_IN_SEED}..${MAX_PRIMES_IN_SEED} primi"
             got=$(ls -d out/risultati-* 2>/dev/null | wc -l)
             echo "- Fette attese: $EXPECTED, con artifact: $got"
             echo "- Fette complete: $(cat out/*/status.txt 2>/dev/null | grep -c '^DONE')"
@@ -100,3 +134,47 @@ jobs:
               echo "Nessuna. (Se mancano artifact rispetto alle fette attese, quei job sono falliti o annullati: rilancia i loro intervalli.)"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # 4) se ci sono hit_*, li committa sul branch main (cartella hits/)
+  save-hits:
+    needs: [plan, run]
+    if: always() && needs.plan.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          sparse-checkout: hits
+          sparse-checkout-cone-mode: true
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+        continue-on-error: true
+      - name: Commit dei file hits_* su main
+        run: |
+          shopt -s nullglob
+          mkdir -p hits
+          n=0
+          for f in out/risultati-*/hits_*.txt; do
+            slice=$(basename "$(dirname "$f")")
+            slice=${slice#risultati-}
+            base=$(basename "$f" .txt)
+            cp "$f" "hits/${base}_fetta${slice}_run${GITHUB_RUN_ID}.txt"
+            n=$((n+1))
+          done
+          if [ "$n" -eq 0 ]; then
+            echo "Nessun file hits_* da salvare."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add hits
+          git commit -m "Taxicab: $n file hits (run ${GITHUB_RUN_ID}, primi fino a ${PRIMES_SET}, seed ${MIN_PRIMES_IN_SEED}..${MAX_PRIMES_IN_SEED})"
+          for i in 1 2 3 4 5; do
+            git pull --rebase origin main && git push origin HEAD:main && exit 0
+            sleep $((RANDOM % 10 + 3))
+          done
+          echo "Push su main fallito dopo 5 tentativi"
+          exit 1
